@@ -57,7 +57,7 @@ import java.util.List;
 public class TwaLauncher {
     private static final String TAG = "TwaLauncher";
 
-    private static final int DEFAULT_SESSION_ID = 96375;
+    static final int DEFAULT_SESSION_ID = 96375;
 
     private static final String EXTRA_STARTUP_UPTIME_MILLIS =
             "org.chromium.chrome.browser.customtabs.trusted.STARTUP_UPTIME_MILLIS";
@@ -154,6 +154,8 @@ public class TwaLauncher {
 
     private final TokenStore mTokenStore;
 
+    private final boolean mTokenMismatch;
+
     private boolean mDestroyed;
 
     private long mStartupUptimeMillis;
@@ -209,6 +211,15 @@ public class TwaLauncher {
      */
     public TwaLauncher(Context context, @Nullable String providerPackage, @Nullable Integer sessionId,
                        TokenStore tokenStore) {
+        this(context, providerPackage, sessionId, tokenStore, null);
+    }
+
+    /**
+     * Creates an instance locked to a specific providerPackage with an expected Token.
+     * If the installed providerPackage does not match the expected Token, mTokenMismatch is set to true.
+     */
+    public TwaLauncher(Context context, @Nullable String providerPackage, @Nullable Integer sessionId,
+                       TokenStore tokenStore, @Nullable Token expectedToken) {
         mContext = context;
         mSessionId = sessionId;
         mTokenStore = tokenStore;
@@ -221,6 +232,8 @@ public class TwaLauncher {
             mProviderPackage = providerPackage;
             mLaunchMode = TwaProviderPicker.LaunchMode.TRUSTED_WEB_ACTIVITY;
         }
+        mTokenMismatch = expectedToken != null
+                && (mProviderPackage == null || !expectedToken.matches(mProviderPackage, context.getPackageManager()));
     }
 
     /**
@@ -256,6 +269,14 @@ public class TwaLauncher {
                        FallbackStrategy fallbackStrategy) {
         if (mDestroyed) {
             throw new IllegalStateException("TwaLauncher already destroyed");
+        }
+
+        // If the installed package's signing certificate does not match the expected token,
+        // immediately invoke the fallback strategy and abort to prevent connecting to or launching
+        // an untrusted provider.
+        if (mTokenMismatch) {
+            fallbackStrategy.launch(mContext, twaBuilder, mProviderPackage, completionCallback);
+            return;
         }
 
         if (mLaunchMode == TwaProviderPicker.LaunchMode.TRUSTED_WEB_ACTIVITY) {
@@ -397,9 +418,15 @@ public class TwaLauncher {
 
     /**
      * Returns package name of the browser this TwaLauncher is launching.
+     * Returns {@code null} if there is a token mismatch to prevent untrusted packages that
+     * failed signature verification from being stored as the last launched provider or used
+     * in shortcuts.
      */
     @Nullable
     public String getProviderPackage() {
+        if (mTokenMismatch) {
+            return null;
+        }
         return mProviderPackage;
     }
 

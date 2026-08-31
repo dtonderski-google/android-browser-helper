@@ -24,6 +24,8 @@ import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.content.pm.PackageInfo;
 import android.os.Bundle;
+import android.util.Base64;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -31,10 +33,14 @@ import androidx.browser.customtabs.CustomTabColorSchemeParams;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.trusted.LaunchHandlerClientMode;
 import androidx.browser.trusted.ScreenOrientation;
+import androidx.browser.trusted.Token;
 import androidx.browser.trusted.TrustedWebActivityDisplayMode;
 import androidx.browser.trusted.TrustedWebActivityIntentBuilder;
 import androidx.core.content.ContextCompat;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -202,6 +208,12 @@ public class LauncherActivityMetadata {
     private static final String METADATA_LAUNCHING_BROWSER_NAME =
             "android.support.customtabs.trusted.LAUNCHING_BROWSER_NAME";
 
+    /**
+     * The serialized and base64-encoded Token of the browser that the TWA should be launched in.
+     */
+    private static final String METADATA_LAUNCHING_BROWSER_TOKEN =
+            "android.support.customtabs.trusted.LAUNCHING_BROWSER_TOKEN";
+
     private final static int DEFAULT_COLOR_ID = android.R.color.white;
     private final static int DEFAULT_DIVIDER_COLOR_ID = android.R.color.transparent;
 
@@ -227,6 +239,7 @@ public class LauncherActivityMetadata {
     public final boolean startChromeBeforeAnimationComplete;
     @Nullable public final String launchingBrowser;
     @Nullable public final String launchingBrowserName;
+    @Nullable public final Token launchingBrowserToken;
 
     private LauncherActivityMetadata(@NonNull Bundle metaData, @NonNull Resources resources) {
         defaultUrl = metaData.getString(METADATA_DEFAULT_URL);
@@ -264,7 +277,12 @@ public class LauncherActivityMetadata {
                 metaData.getString(LAUNCH_HANDLER_CLIENT_MODE_METADATA_NAME));
         startChromeBeforeAnimationComplete =
                 metaData.getBoolean(METADATA_START_CHROME_BEFORE_ANIMATION_COMPLETE, true);
-        launchingBrowser = metaData.getString(METADATA_LAUNCHING_BROWSER);
+        launchingBrowserToken = parseToken(metaData.getString(METADATA_LAUNCHING_BROWSER_TOKEN));
+        String launchingBrowserStr = metaData.getString(METADATA_LAUNCHING_BROWSER);
+        if (launchingBrowserStr == null && launchingBrowserToken != null) {
+            launchingBrowserStr = getPackageNameFromToken(metaData.getString(METADATA_LAUNCHING_BROWSER_TOKEN));
+        }
+        launchingBrowser = launchingBrowserStr;
         launchingBrowserName = metaData.getString(METADATA_LAUNCHING_BROWSER_NAME);
     }
 
@@ -451,5 +469,48 @@ public class LauncherActivityMetadata {
         }
 
         return new LauncherActivityMetadata(metaData, resources);
+    }
+
+    @Nullable
+    private static Token parseToken(@Nullable String tokenStr) {
+        if (tokenStr == null || tokenStr.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            byte[] serialized = Base64.decode(tokenStr, Base64.DEFAULT);
+            DataInputStream in = new DataInputStream(new ByteArrayInputStream(serialized));
+            String pkg = in.readUTF();
+            int numFp = in.readInt();
+            if (pkg.isEmpty() || numFp <= 0) {
+                return null;
+            }
+            for (int i = 0; i < numFp; i++) {
+                int len = in.readInt();
+                if (len <= 0) {
+                    return null;
+                }
+                byte[] fp = new byte[len];
+                in.readFully(fp);
+            }
+            return Token.deserialize(serialized);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to deserialize launching browser token", e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private static String getPackageNameFromToken(@Nullable String tokenStr) {
+        if (tokenStr == null || tokenStr.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            byte[] serialized = Base64.decode(tokenStr, Base64.DEFAULT);
+            DataInputStream in = new DataInputStream(new ByteArrayInputStream(serialized));
+            return in.readUTF();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to read package name from launching browser token", e);
+            return null;
+        }
     }
 }

@@ -93,6 +93,79 @@ In your `AndroidManifest.xml`, reference `shortcuts.xml` within the `<activity>`
 
 `ShortcutTrampolineActivity` runs with `Theme.NoDisplay` and will process the shortcut launch securely by validating the URL against your configured TWA domains, routing the launch asynchronously using the application context, and closing itself instantly before any window transitions are impacted.
 
+## Explicit Browser Targeting and Browser Pinning
+
+By default, Android Browser Helper uses `TwaProviderPicker` to automatically query the device and launch an installed browser that supports Trusted Web Activities (preferring the user's default browser).
+
+In specialized use cases (such as enterprise deployments, kiosk devices, or applications designed to pair strictly with a specific browser), you can manually pin your TWA to a specific browser and optionally enforce signature verification using an expected `Token`.
+
+### 1. Specifying the target browser in `AndroidManifest.xml`
+
+Configure the following `<meta-data>` tags inside your `<activity>` declaration (such as `LauncherActivity`):
+
+```xml
+<activity android:name="com.google.androidbrowserhelper.trusted.LauncherActivity" ...>
+    ...
+    <!-- Optional: The package name of the browser to launch in -->
+    <meta-data
+        android:name="android.support.customtabs.trusted.LAUNCHING_BROWSER"
+        android:value="com.example.browser" />
+
+    <!-- Optional: Human-readable name of the browser shown to the user if unavailable -->
+    <meta-data
+        android:name="android.support.customtabs.trusted.LAUNCHING_BROWSER_NAME"
+        android:value="Example Browser" />
+
+    <!-- Optional: Base64-encoded serialized androidx.browser.trusted.Token for signature verification -->
+    <meta-data
+        android:name="android.support.customtabs.trusted.LAUNCHING_BROWSER_TOKEN"
+        android:value="BASE64_SERIALIZED_TOKEN" />
+</activity>
+```
+
+- **Targeting without signature verification**: Specifying only `LAUNCHING_BROWSER` (and optionally `LAUNCHING_BROWSER_NAME`) will target that browser package directly.
+- **Targeting with signature verification (Recommended)**: Specifying `LAUNCHING_BROWSER_TOKEN` ensures that only an installed package matching both the package name and signing certificate will be used. If `LAUNCHING_BROWSER` is omitted, the package name is automatically inferred from the token. If signature verification fails or the browser is not installed, the launch is aborted immediately to avoid connecting to or launching an untrusted application, and the blocked dialog fallback is shown.
+- **Default behavior**: If neither is specified, Android Browser Helper continues to automatically pick the best available browser via `TwaProviderPicker`.
+
+### 2. Generating the `LAUNCHING_BROWSER_TOKEN`
+
+To generate the serialized Base64 token for your target browser, you can use the `Token` API from `androidx.browser:browser`:
+
+```java
+import android.util.Base64;
+import androidx.browser.trusted.Token;
+
+// With the target browser installed on the device:
+Token token = Token.create("com.example.browser", packageManager);
+if (token != null) {
+    String base64Token = Base64.encodeToString(token.serialize(), Base64.NO_WRAP);
+    Log.d("TokenGenerator", "LAUNCHING_BROWSER_TOKEN: " + base64Token);
+}
+```
+
+### 3. Key Rotation Support
+
+Token verification natively supports Android key rotation (on Android 9 / API 28+) via the platform `PackageManager.hasSigningCertificate()` API.
+- Generating a token with `Token.create(...)` extracts the original signing certificate from the app's signing certificate history (`SigningInfo.getSigningCertificateHistory()`).
+- Because `hasSigningCertificate` searches the full signing certificate lineage, the TWA continues to verify successfully even after the browser rotates its signing key using APK Signature Scheme v3.
+
+### 4. Programmatic Usage with `TwaLauncher`
+
+If you are not using `LauncherActivity` and are managing `TwaLauncher` directly, pass the target package and expected `Token` to the constructor:
+
+```java
+Token expectedToken = Token.deserialize(Base64.decode(base64TokenString, Base64.DEFAULT));
+TwaLauncher launcher = new TwaLauncher(context, "com.example.browser", sessionId, tokenStore, expectedToken);
+
+launcher.launch(
+    twaBuilder,
+    customTabsCallback,
+    splashScreenStrategy,
+    completionCallback,
+    TwaLauncher.getBlockedDialogFallbackStrategy("Example Browser")
+);
+```
+
 ## Source Code Headers
 
 Every file containing source code must include copyright and license

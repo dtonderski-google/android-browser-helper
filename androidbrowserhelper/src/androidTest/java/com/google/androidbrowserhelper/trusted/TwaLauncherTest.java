@@ -20,6 +20,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import static androidx.browser.customtabs.TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY;
 
@@ -54,6 +56,7 @@ import org.junit.runner.RunWith;
 import androidx.browser.customtabs.CustomTabsCallback;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.trusted.Token;
 import androidx.browser.trusted.TrustedWebActivityIntentBuilder;
 import androidx.test.InstrumentationRegistry;
 import androidx.test.filters.MediumTest;
@@ -336,6 +339,57 @@ public class TwaLauncherTest {
 
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         verify(mockStrategy).show(any(), eq(false), eq(null));
+    }
+
+    @Test
+    public void twaLauncher_withMismatchedToken_fallsBackToBlockedDialog() throws Exception {
+        TwaLauncher.BrowserUnavailableDialogStrategy mockStrategy =
+                mock(TwaLauncher.BrowserUnavailableDialogStrategy.class);
+        TwaLauncher.setDialogStrategyForTesting(mockStrategy);
+
+        Token mismatchedToken = mock(Token.class);
+        when(mismatchedToken.matches(any(), any())).thenReturn(false);
+
+        TwaLauncher launcher = new TwaLauncher(mActivity, mContext.getPackageName(),
+                SessionStore.makeSessionId(mActivity.getTaskId()),
+                new SharedPreferencesTokenStore(mActivity), mismatchedToken);
+
+        TwaLauncher.FallbackStrategy fallback =
+                TwaLauncher.getBlockedDialogFallbackStrategy("MyBrowser");
+        mActivity.runOnUiThread(() -> launcher.launch(makeBuilder(), mCustomTabsCallback,
+                null, null, fallback));
+
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        verify(mockStrategy).show(any(), eq(false), eq("MyBrowser"));
+    }
+
+    @Test
+    public void twaLauncher_withMatchingToken_launchesTwa() throws Exception {
+        Token matchingToken = mock(Token.class);
+        when(matchingToken.matches(any(), any())).thenReturn(true);
+
+        TwaLauncher launcher = new TwaLauncher(mActivity, mContext.getPackageName(),
+                SessionStore.makeSessionId(mActivity.getTaskId()),
+                new SharedPreferencesTokenStore(mActivity), matchingToken);
+
+        TwaLauncher.FallbackStrategy fallback =
+                TwaLauncher.getBlockedDialogFallbackStrategy("MyBrowser");
+        Runnable launchRunnable = () -> launcher.launch(makeBuilder(), mCustomTabsCallback,
+                null, null, fallback);
+        TestBrowser browser = getBrowserActivityWhenLaunched(launchRunnable);
+        assertTrue(browser.getIntent().getBooleanExtra(EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, false));
+    }
+
+    @Test
+    public void twaLauncher_withMismatchedToken_returnsNullProviderPackage() {
+        Token mismatchedToken = mock(Token.class);
+        when(mismatchedToken.matches(any(), any())).thenReturn(false);
+
+        TwaLauncher launcher = new TwaLauncher(mActivity, mContext.getPackageName(),
+                SessionStore.makeSessionId(mActivity.getTaskId()),
+                new SharedPreferencesTokenStore(mActivity), mismatchedToken);
+
+        assertNull(launcher.getProviderPackage());
     }
 
     private TrustedWebActivityIntentBuilder makeBuilder() {

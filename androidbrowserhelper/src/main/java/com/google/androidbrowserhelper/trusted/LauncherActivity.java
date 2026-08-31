@@ -255,7 +255,13 @@ public class LauncherActivity extends Activity {
     }
 
     protected TwaLauncher createTwaLauncher() {
-        return new TwaLauncher(this, mMetadata.launchingBrowser, SessionStore.makeSessionId(getTaskId()),
+        if (mMetadata.launchingBrowser != null) {
+            return new TwaLauncher(this, mMetadata.launchingBrowser,
+                    SessionStore.makeSessionId(getTaskId()),
+                    new SharedPreferencesTokenStore(this),
+                    mMetadata.launchingBrowserToken);
+        }
+        return new TwaLauncher(this, null, SessionStore.makeSessionId(getTaskId()),
                 new SharedPreferencesTokenStore(this));
     }
 
@@ -454,7 +460,7 @@ public class LauncherActivity extends Activity {
      * fallback implementation ot starting a native Activity.
      */
     protected TwaLauncher.FallbackStrategy getFallbackStrategy() {
-        if (mMetadata.launchingBrowser != null) {
+        if (mMetadata.launchingBrowser != null || mMetadata.launchingBrowserToken != null) {
             return TwaLauncher.getBlockedDialogFallbackStrategy(mMetadata.launchingBrowserName);
         }
         if (FALLBACK_TYPE_WEBVIEW.equalsIgnoreCase(mMetadata.fallbackStrategyType)) {

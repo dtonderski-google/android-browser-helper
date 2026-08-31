@@ -141,4 +141,47 @@ public class ShortcutTrampolineActivityTest {
         Intent launchedIntent = shadowOf(RuntimeEnvironment.application).getNextStartedActivity();
         assertNull(launchedIntent);
     }
+
+    @Test
+    public void dropsLaunchWhenLaunchingBrowserTokenMismatches() {
+        PackageInfo browserInfo = new PackageInfo();
+        browserInfo.packageName = "com.other.browser";
+        browserInfo.signatures = new android.content.pm.Signature[]{new android.content.pm.Signature("1234")};
+        mShadowPackageManager.addPackage(browserInfo);
+
+        androidx.browser.trusted.Token token =
+                androidx.browser.trusted.Token.create("com.other.browser", mContext.getPackageManager());
+        String base64Token = android.util.Base64.encodeToString(token.serialize(), android.util.Base64.DEFAULT);
+
+        ActivityInfo dummyLauncherActivity = new ActivityInfo();
+        dummyLauncherActivity.packageName = mContext.getPackageName();
+        dummyLauncherActivity.name = LauncherActivity.class.getName();
+        dummyLauncherActivity.metaData = new Bundle();
+        dummyLauncherActivity.metaData.putString("android.support.customtabs.trusted.DEFAULT_URL", DEFAULT_URL);
+        dummyLauncherActivity.metaData.putString("android.support.customtabs.trusted.LAUNCHING_BROWSER", "com.android.chrome");
+        dummyLauncherActivity.metaData.putString("android.support.customtabs.trusted.LAUNCHING_BROWSER_TOKEN", base64Token);
+
+        ActivityInfo trampolineActivity = new ActivityInfo();
+        trampolineActivity.packageName = mContext.getPackageName();
+        trampolineActivity.name = ShortcutTrampolineActivity.class.getName();
+
+        PackageInfo packageInfo = new PackageInfo();
+        packageInfo.packageName = mContext.getPackageName();
+        packageInfo.activities = new ActivityInfo[]{dummyLauncherActivity, trampolineActivity};
+        mShadowPackageManager.addPackage(packageInfo);
+
+        Uri trustedUri = Uri.parse("https://www.example.com/twa/shortcut");
+        Intent intent = new Intent(Intent.ACTION_VIEW).setData(trustedUri);
+
+        ActivityController<ShortcutTrampolineActivity> controller =
+                Robolectric.buildActivity(ShortcutTrampolineActivity.class, intent);
+
+        controller.create();
+        shadowOf(Looper.getMainLooper()).idle();
+
+        assertTrue(controller.get().isFinishing());
+
+        Intent launchedIntent = shadowOf(RuntimeEnvironment.application).getNextStartedActivity();
+        assertNull(launchedIntent);
+    }
 }
